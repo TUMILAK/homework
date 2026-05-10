@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>智能体工作台</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.1.1/css/pico.min.css"
+    />
+    <link rel="stylesheet" href="/css/app.css" />
+    <script src="/js/prefs.js"></script>
+    <script src="/js/theme.js"></script>
+    <script src="/js/agent_socket.js"></script>
+  </head>
+  <body class="page">
+    <header class="topbar">
+      <div class="brand">
+        <h1>工作台</h1>
+        <span>WebSocket · DeepSeek · MCP</span>
+      </div>
+      <nav class="topnav" aria-label="主导航">
+        <a class="navlink" href="/index.html">主页</a>
+        <a class="navlink" href="/crawl.html">爬取</a>
+        <a class="navlink primary" href="/settings.html">设置</a>
+      </nav>
+    </header>
+
+    <main class="main">
+      <div class="card">
+        <h2 style="margin: 0 0 1rem; font-size: 0.9375rem; font-weight: 600">EPUB 汉化</h2>
+        <p class="hint theme-hint" style="margin-top: 0">
+          上传未汉化 EPUB：正文按片段批量调用 DeepSeek（JSON 对齐键位，思路参考
+          <a href="https://github.com/NEKOparapa/AiNiee" target="_blank" rel="noopener">AiNiee</a>
+          等书籍翻译工具），支持<strong>正则预处理</strong>（送译前）与可选<strong>第二遍润色</strong>，再写回 XHTML 与
+          <code style="color: var(--text)">toc.ncx</code> 后重打包至
+          <code style="color: var(--text)">workspace/epub_out/</code>。Key / 模型来自「设置」。
+        </p>
+        <div class="form-row">
+          <label for="epubFile">选择 EPUB</label>
+          <input id="epubFile" type="file" accept=".epub,application/epub+zip" />
+        </div>
+        <div class="form-row">
+          <label for="epubGlossary">术语表（可选，每行 <code style="color: var(--text)">原文=译文</code>）</label>
+          <textarea id="epubGlossary" rows="3" spellcheck="false" placeholder="Alice=爱丽丝"></textarea>
+        </div>
+        <div class="form-row">
+          <label for="epubRegex">正则预处理（可选，每行 <code style="color: var(--text)">正则|||替换|||imsx</code>，flags 可省略）</label>
+          <textarea
+            id="epubRegex"
+            rows="4"
+            spellcheck="false"
+            placeholder="例：^[ \\t]+|||  与  \\.{3}|||……|||s"
+          ></textarea>
+        </div>
+        <div class="form-row">
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer">
+            <input id="epubPolishSecond" type="checkbox" checked />
+            <span>第二遍润色（初译后再走一轮 JSON 润色）</span>
+          </label>
+        </div>
+        <div class="actions">
+          <button id="epubRun" class="primary" type="button">上传并汉化</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin: 0 0 1rem; font-size: 0.9375rem; font-weight: 600">图片汉化嵌字</h2>
+        <p class="hint theme-hint" style="margin-top: 0">
+          上传漫画页或游戏截图：本地 <strong>RapidOCR</strong> 抽框 → 片段批量走 <strong>DeepSeek</strong>（与 EPUB 相同的 JSON
+          批译与术语表）→ 在识别区域内填底并嵌简体中文。流程参考
+          <a href="https://github.com/PantsuDango/Dango-Translator" target="_blank" rel="noopener">团子翻译器</a>
+          的「识图–译–嵌字」思路；服务端需已安装
+          <code style="color: var(--text)">rapidocr-onnxruntime</code> 等依赖（见仓库
+          <code style="color: var(--text)">requirements.txt</code>）。输出在
+          <code style="color: var(--text)">workspace/image_out/</code>。
+        </p>
+        <div class="form-row">
+          <label for="imgFile">选择图片</label>
+          <input id="imgFile" type="file" accept="image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif" />
+        </div>
+        <div class="form-row">
+          <label for="imgGlossary">术语表（可选，每行 <code style="color: var(--text)">原文=译文</code>）</label>
+          <textarea id="imgGlossary" rows="2" spellcheck="false" placeholder="与 EPUB 相同格式"></textarea>
+        </div>
+        <div class="form-row">
+          <label for="imgRegex">正则预处理（可选，格式同 EPUB）</label>
+          <textarea id="imgRegex" rows="3" spellcheck="false" placeholder="送译前对 OCR 文本做替换"></textarea>
+        </div>
+        <div class="actions">
+          <button id="imgRun" class="primary" type="button">上传并汉化嵌字</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin: 0 0 1rem; font-size: 0.9375rem; font-weight: 600">智能体会话</h2>
+        <div class="form-row">
+          <label for="mode">调度范式</label>
+          <select id="mode">
+            <option value="react" selected>ReAct（默认）</option>
+            <option value="plan">Plan-and-Execute</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <label for="msg">本轮输入</label>
+          <textarea id="msg" rows="4" placeholder="先在 workspace/catalog 看一眼已经有哪些抓取结果……" spellcheck="false"></textarea>
+        </div>
+
+        <div class="actions">
+          <button id="connect" type="button">连接</button>
+          <button id="clear" type="button">清空服务端上下文</button>
+          <button id="send" class="primary" type="button" disabled>发送</button>
+          <button id="disconnect" type="button" disabled>断开</button>
+        </div>
+      </div>
+
+      <section class="stack-gap">
+        <h2 style="margin: 0 0 8px; font-size: 0.9375rem; font-weight: 600">事件流（含 EPUB / 图片嵌字日志）</h2>
+        <div id="log" class="log" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <script>
+      const qs = (id) => document.getElementById(id);
+
+      function esc(s) {
+        return String(s)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;");
+      }
+
+      function logLine(kind, text) {
+        const line = document.createElement("pre");
+        line.className = "line";
+        if (kind === "err") line.classList.add("err");
+        if (kind === "warn") line.classList.add("warn");
+        line.textContent = text;
+        qs("log").appendChild(line);
+        qs("log").scrollTop = qs("log").scrollHeight;
+      }
+
+      /** @type {WebSocket|null} */
+      let ws = null;
+
+      qs("disconnect").onclick = () => {
+        try {
+          ws && ws.close();
+        } finally {
+          ws = null;
+          qs("send").disabled = true;
+          qs("disconnect").disabled = true;
+        }
+      };
+
+      qs("connect").onclick = async () => {
+        qs("connect").disabled = true;
+        try {
+          ws = await AgentSocket.openAndConfigure();
+          qs("send").disabled = false;
+          qs("disconnect").disabled = false;
+
+          ws.addEventListener("message", (ev) => {
+            let msg = null;
+            try {
+              msg = JSON.parse(ev.data);
+            } catch {
+              logLine("", String(ev.data));
+              return;
+            }
+
+            const t = msg.type || "event";
+            if (t === "assistant") logLine("", `assistant: ${esc(msg.content || "")}`);
+            else if (t === "phase") logLine("", `phase: ${msg.phase || ""}`);
+            else if (t === "tool_call") {
+              logLine("", `tool_call: ${msg.name}\n${esc(JSON.stringify(msg.arguments || {}, null, 2))}`);
+            } else if (t === "tool_result") {
+              logLine("", `tool_result: ${msg.name} ok=${String(msg.ok)}\n${esc(msg.preview || "")}`);
+            } else if (t === "plan") {
+              logLine("", `plan_json:\n${esc(JSON.stringify(msg.plan || {}, null, 2))}`);
+            } else if (t === "plan_error") {
+              logLine("err", `plan_error: ${esc(msg.detail || "")}`);
+            } else if (t === "execute_skip") {
+              logLine("warn", `${esc(JSON.stringify(msg, null, 2))}`);
+            } else if (t === "turn_start" || t === "turn_done") logLine("", `[${t}]`);
+            else if (t === "history_cleared") logLine("", "[server] history cleared");
+            else if (t === "error") logLine("err", `error: ${esc(msg.detail || "")}`);
+            else logLine("", `${t}: ${esc(JSON.stringify(msg))}`);
+          });
+
+          ws.addEventListener("close", () => {
+            qs("send").disabled = true;
+            qs("disconnect").disabled = true;
+            logLine("warn", "[local] socket closed");
+          });
+        } catch (e) {
+          logLine("err", String(e?.message || e));
+        } finally {
+          qs("connect").disabled = false;
+        }
+      };
+
+      qs("clear").onclick = () => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        ws.send(JSON.stringify({ type: "clear_history" }));
+      };
+
+      qs("send").onclick = () => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        const mode = qs("mode").value;
+        const content = qs("msg").value.trim();
+        if (!content) return;
+        ws.send(JSON.stringify({ type: "chat", mode, content }));
+      };
+
+      qs("epubRun").onclick = async () => {
+        const inp = qs("epubFile");
+        const f = inp.files && inp.files[0];
+        if (!f) {
+          logLine("warn", "请先选择 .epub 文件");
+          return;
+        }
+        if (!f.name.toLowerCase().endsWith(".epub")) {
+          logLine("warn", "文件扩展名应为 .epub");
+          return;
+        }
+        const ds = AppPrefs.deepseek();
+        if (!ds.apiKey.trim()) {
+          logLine("err", "请先在「设置」保存 DeepSeek API Key，或使用服务端 DPSK_API_KEY");
+          return;
+        }
+        const origin = AppPrefs.backendOrigin().replace(/\/+$/, "");
+        qs("epubRun").disabled = true;
+        logLine("", `EPUB：开始上传「${f.name}」…（正文多时会较久，请勿关闭页面）`);
+        try {
+          const fd = new FormData();
+          fd.append("file", f, f.name);
+          fd.append("deepseek_api_key", ds.apiKey);
+          fd.append("deepseek_base_url", ds.baseUrl);
+          fd.append("model", ds.model);
+          fd.append("epub_glossary", qs("epubGlossary").value.trim());
+          fd.append("epub_regex_rules", qs("epubRegex").value);
+          fd.append("epub_polish_second", qs("epubPolishSecond").checked ? "1" : "");
+          const r = await fetch(`${origin}/api/epub/localize`, { method: "POST", body: fd });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) {
+            const d = j.detail;
+            logLine("err", `EPUB 失败：${typeof d === "string" ? d : JSON.stringify(d)}`);
+            return;
+          }
+          const href = `${origin}/api/catalog/download?path=${encodeURIComponent(j.path)}`;
+          logLine("", `EPUB 完成：${j.path}（${j.bytes} bytes）\n下载：${href}`);
+        } catch (e) {
+          logLine("err", `EPUB：${String(e?.message || e)}`);
+        } finally {
+          qs("epubRun").disabled = false;
+        }
+      };
+
+      qs("imgRun").onclick = async () => {
+        const inp = qs("imgFile");
+        const f = inp.files && inp.files[0];
+        if (!f) {
+          logLine("warn", "请先选择图片文件");
+          return;
+        }
+        const ds = AppPrefs.deepseek();
+        if (!ds.apiKey.trim()) {
+          logLine("err", "请先在「设置」保存 DeepSeek API Key，或使用服务端 DPSK_API_KEY");
+          return;
+        }
+        const origin = AppPrefs.backendOrigin().replace(/\/+$/, "");
+        qs("imgRun").disabled = true;
+        logLine("", `图片嵌字：开始上传「${f.name}」…（OCR + 多框翻译可能较久）`);
+        try {
+          const fd = new FormData();
+          fd.append("file", f, f.name);
+          fd.append("deepseek_api_key", ds.apiKey);
+          fd.append("deepseek_base_url", ds.baseUrl);
+          fd.append("model", ds.model);
+          fd.append("image_glossary", qs("imgGlossary").value.trim());
+          fd.append("image_regex_rules", qs("imgRegex").value);
+          const r = await fetch(`${origin}/api/image/comic_translate`, { method: "POST", body: fd });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) {
+            const d = j.detail;
+            logLine("err", `图片嵌字失败：${typeof d === "string" ? d : JSON.stringify(d)}`);
+            return;
+          }
+          const href = `${origin}/api/catalog/download?path=${encodeURIComponent(j.path)}`;
+          logLine("", `图片嵌字完成：${j.path}（${j.bytes} bytes）\n下载：${href}`);
+        } catch (e) {
+          logLine("err", `图片嵌字：${String(e?.message || e)}`);
+        } finally {
+          qs("imgRun").disabled = false;
+        }
+      };
+    </script>
+  </body>
+</html>

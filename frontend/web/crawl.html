@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>链接爬取</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.1.1/css/pico.min.css"
+    />
+    <link rel="stylesheet" href="/css/app.css" />
+    <script src="/js/prefs.js"></script>
+    <script src="/js/theme.js"></script>
+    <script src="/js/agent_socket.js"></script>
+  </head>
+  <body class="page">
+    <header class="topbar">
+      <div class="brand">
+        <h1>爬取</h1>
+        <span>URL → workspace/catalog</span>
+      </div>
+      <nav class="topnav" aria-label="主导航">
+        <a class="navlink" href="/index.html">主页</a>
+        <a class="navlink" href="/agent.html">智能体</a>
+        <a class="navlink primary" href="/settings.html">设置</a>
+      </nav>
+    </header>
+
+    <main class="main">
+      <div class="card">
+        <div class="form-row">
+          <label for="url">页面 URL</label>
+          <input id="url" placeholder="https://example.com/article" autocomplete="off" spellcheck="false" />
+        </div>
+
+        <div class="form-row">
+          <label for="mode">调度范式</label>
+          <select id="mode">
+            <option value="react" selected>ReAct（迭代工具调用）</option>
+            <option value="plan">Plan-and-Execute（单次 JSON → 线性执行）</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <label for="goal">发给模型的目标（可自行微调）</label>
+          <textarea id="goal" rows="6" spellcheck="false"></textarea>
+        </div>
+
+        <div class="actions">
+          <button id="preset" type="button">填入默认提示</button>
+          <button id="connect" type="button">连接 MCP</button>
+          <button id="run" class="primary" type="button" disabled>开始</button>
+          <button id="closeWs" type="button" disabled>断开</button>
+        </div>
+        <p id="statusLine" class="hint">
+          请先在「设置」里保存 DeepSeek Key，或使用服务端环境变量。
+        </p>
+      </div>
+
+      <section class="stack-gap">
+        <h2 style="margin: 0 0 8px; font-size: 0.9375rem; font-weight: 600">会话日志</h2>
+        <div id="log" class="log" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <script>
+      const qs = (id) => document.getElementById(id);
+
+      function esc(s) {
+        return String(s)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;");
+      }
+
+      function logLine(kind, text) {
+        const line = document.createElement("pre");
+        line.className = "line";
+        if (kind === "err") line.classList.add("err");
+        if (kind === "warn") line.classList.add("warn");
+        line.textContent = text;
+        qs("log").appendChild(line);
+        qs("log").scrollTop = qs("log").scrollHeight;
+      }
+
+      function presetGoal() {
+        const url = (qs("url").value || "").trim();
+        if (!url) {
+          qs("goal").value = [
+            "目标：对用户提供的 URL 做深度抓取，",
+            "优先调用 deep_crawl_url，将抓取结果存入 workspace/catalog。",
+            "完成后调用 ls（若需要可加 catalog 前缀过滤）校验文件已存在，",
+            "并给出相对路径。",
+            "",
+            "URL:",
+            "<<<在此处粘贴 URL>>>",
+          ].join("\n");
+          return;
+        }
+
+        qs("goal").value = [
+          "目标：对下面 URL 做深度抓取。",
+          "1) 调用 deep_crawl_url(url=\"...\") 保存抓取结果（默认 Markdown，位于 catalog）。",
+          "2) 用 ls / workspace_file_io 读取少量片段确认写入成功并回报相对路径。",
+          "",
+          `URL=${url}`,
+        ].join("\n");
+      }
+
+      /** @type {WebSocket|null} */
+      let ws = null;
+
+      qs("preset").onclick = presetGoal;
+
+      qs("closeWs").onclick = () => {
+        try {
+          ws && ws.close();
+        } finally {
+          ws = null;
+          qs("run").disabled = true;
+          qs("closeWs").disabled = true;
+          logLine("warn", "[local] websocket closed");
+        }
+      };
+
+      qs("connect").onclick = async () => {
+        qs("connect").disabled = true;
+        try {
+          logLine("", "[local] connecting…");
+          ws = await AgentSocket.openAndConfigure();
+          qs("run").disabled = false;
+          qs("closeWs").disabled = false;
+          logLine("", "[local] connected + configured");
+
+          ws.addEventListener("message", (ev) => {
+            let msg = null;
+            try {
+              msg = JSON.parse(ev.data);
+            } catch {
+              logLine("", String(ev.data));
+              return;
+            }
+
+            const t = msg.type || "event";
+            if (t === "assistant") logLine("", `assistant: ${esc(msg.content || "")}`);
+            else if (t === "phase") logLine("", `phase: ${msg.phase || ""}`);
+            else if (t === "tool_call") {
+              logLine("", `tool_call: ${msg.name}\narguments: ${esc(JSON.stringify(msg.arguments || {}, null, 2))}`);
+            } else if (t === "tool_result") {
+              logLine("", `tool_result: ${msg.name} ok=${String(msg.ok)}\n${esc(msg.preview || "")}`);
+            } else if (t === "plan") {
+              logLine("", `plan_json:\n${esc(JSON.stringify(msg.plan || {}, null, 2))}`);
+            } else if (t === "plan_error") {
+              logLine("err", `plan_error: ${esc(msg.detail || "")}`);
+            } else if (t === "execute_skip") {
+              logLine("warn", `execute_skip:\n${esc(JSON.stringify(msg, null, 2))}`);
+            } else if (t === "turn_start" || t === "turn_done") {
+              logLine("", `[${t}]`);
+            } else if (t === "error") {
+              logLine("err", `error: ${esc(msg.detail || "")}`);
+            } else {
+              logLine("", `${t}:\n${esc(JSON.stringify(msg, null, 2))}`);
+            }
+          });
+
+          ws.addEventListener("close", () => {
+            qs("run").disabled = true;
+            qs("closeWs").disabled = true;
+            logLine("warn", "[local] socket closed");
+          });
+        } catch (e) {
+          logLine("err", `[local] connect failed: ${String(e?.message || e)}`);
+          ws = null;
+        } finally {
+          qs("connect").disabled = false;
+        }
+      };
+
+      qs("run").onclick = () => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        const mode = qs("mode").value;
+        const content = qs("goal").value.trim();
+
+        ws.send(JSON.stringify({ type: "chat", mode, content }));
+
+        qs("goal").blur();
+      };
+
+      presetGoal();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>设置 · DeepSeek</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.1.1/css/pico.min.css"
+    />
+    <link rel="stylesheet" href="/css/app.css" />
+    <script src="/js/prefs.js"></script>
+    <script src="/js/theme.js"></script>
+  </head>
+  <body class="page">
+    <header class="topbar">
+      <div class="brand">
+        <h1>设置</h1>
+        <span>API、后端与外观</span>
+      </div>
+      <nav class="topnav" aria-label="主导航">
+        <a class="navlink" href="/index.html">主页</a>
+        <a class="navlink" href="/crawl.html">爬取</a>
+        <a class="navlink" href="/agent.html">智能体</a>
+      </nav>
+    </header>
+
+    <main class="main main--narrow">
+      <div class="card">
+        <h2>后端地址</h2>
+        <p class="theme-hint" style="margin-bottom: 0.75rem">
+          填「站点根」即可，不要带 <code style="color: var(--text)">/api</code>（例
+          <code style="color: var(--text)">http://127.0.0.1:8000</code>）。
+        </p>
+        <div class="form-row">
+          <label for="backend">Backend Origin（不含末尾 /）</label>
+          <input id="backend" autocomplete="off" />
+        </div>
+        <div class="actions">
+          <button id="probe" type="button">测试 /api/health</button>
+          <button id="saveBackend" type="button" class="primary">保存后端地址</button>
+        </div>
+        <p id="probeOut" class="hint"></p>
+      </div>
+
+      <div class="card">
+        <h2>DeepSeek</h2>
+        <div class="form-row">
+          <label for="key">API Key</label>
+          <input id="key" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="form-row">
+          <label for="base">Base URL（默认官方）</label>
+          <input id="base" autocomplete="off" />
+        </div>
+        <div class="form-row">
+          <label for="model">Model</label>
+          <input id="model" autocomplete="off" />
+        </div>
+        <div class="actions">
+          <button id="saveDs" type="button" class="primary">保存</button>
+          <button id="clear" type="button">清空 Key（仅前端）</button>
+        </div>
+        <p class="hint" style="margin-top: 0.65rem">
+          Key 仅存浏览器本地；服务端不会持久化密钥。也可以通过环境变量
+          <code style="color: var(--text)">DPSK_API_KEY</code> 提供兜底。
+        </p>
+      </div>
+
+      <div class="card">
+        <h2>外观 · 背景</h2>
+        <p class="theme-hint">
+          背景图从服务端 <code style="color: var(--text)">workspace/wallpaper/</code> 读取。请将图片自行放入该目录（或 MCP
+          写入），再「刷新列表」并选用；本页不提供浏览器上传。
+        </p>
+        <div class="form-row">
+          <label for="bgPreset">预设</label>
+          <select id="bgPreset">
+            <option value="plain">素色（默认）</option>
+            <option value="graphite">石墨</option>
+            <option value="aurora">微光</option>
+            <option value="midnight">午夜</option>
+            <option value="ocean">深海</option>
+            <option value="ember">余烬</option>
+            <option value="wallpaper">本地壁纸（wallpaper/）</option>
+            <option value="custom">自定义</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label for="wallpaperPick">workspace/wallpaper 中的图片</label>
+          <select id="wallpaperPick">
+            <option value="">（先点「刷新列表」）</option>
+          </select>
+          <div class="actions" style="margin-top: 0.75rem">
+            <button id="wallpaperRefresh" type="button">刷新列表</button>
+            <button id="wallpaperUsePick" type="button" class="primary">使用所选为背景</button>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="actions" style="margin-top: 0.25rem">
+            <button id="wallpaperClear" type="button">清除壁纸</button>
+          </div>
+          <p id="wallpaperStatus" class="hint"></p>
+        </div>
+        <div class="form-row">
+          <label for="bgCustom">自定义 CSS（仅「自定义」预设）</label>
+          <textarea
+            id="bgCustom"
+            rows="3"
+            spellcheck="false"
+            placeholder="例：linear-gradient(160deg, #0f172a, #020617) fixed"
+          ></textarea>
+        </div>
+        <div class="actions">
+          <button id="saveTheme" type="button" class="primary">应用背景</button>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      function loadForm() {
+        document.getElementById("backend").value = AppPrefs.backendOrigin();
+
+        const ds = AppPrefs.deepseek();
+        document.getElementById("key").value = ds.apiKey;
+        document.getElementById("base").value = ds.baseUrl;
+        document.getElementById("model").value = ds.model;
+
+        const bg = AppPrefs.getUiBackground();
+        document.getElementById("bgPreset").value = bg.preset;
+        document.getElementById("bgCustom").value = bg.custom;
+      }
+
+      async function fetchWallpaperListPayload() {
+        const origin = AppPrefs.backendOrigin().replace(/\/+$/, "");
+        const listUrl = `${origin}/api/wallpaper/list`;
+        let r = await fetch(listUrl);
+        let j = await r.json().catch(() => ({}));
+        if (r.ok) return j;
+        if (r.status === 404) {
+          r = await fetch(`${origin}/api/catalog`);
+          j = await r.json().catch(() => ({}));
+          if (!r.ok) {
+            const d = j.detail || j.message || r.statusText;
+            throw new Error(
+              typeof d === "string" ? d : `catalog ${r.status}: ${JSON.stringify(d)}`
+            );
+          }
+          const imgExt = /\.(jpe?g|png|webp|gif)$/i;
+          const imgs = (j.files || []).filter((f) => {
+            const p = String(f.path || "").replace(/\\/g, "/");
+            return p.startsWith("wallpaper/") && imgExt.test(p);
+          });
+          const root = String(j.workspace || "").replace(/\\/g, "/").replace(/\/$/, "");
+          return {
+            workspace_root: j.workspace,
+            wallpaper_dir: root ? `${root}/wallpaper` : "",
+            files: imgs.map((f) => {
+              const path = String(f.path || "").replace(/\\/g, "/");
+              const name = path.replace(/^wallpaper\//, "").split("/").pop() || path;
+              return { path, name, size: f.size };
+            }),
+            _via: "catalog",
+          };
+        }
+        const d = j.detail || j.message || r.statusText;
+        throw new Error(
+          `${typeof d === "string" ? d : JSON.stringify(d)}（请求：${listUrl}）`
+        );
+      }
+
+      async function refreshWallpaperList() {
+        const j = await fetchWallpaperListPayload();
+        const sel = document.getElementById("wallpaperPick");
+        const want = AppPrefs.getUiBackground().wallpaperRel || "";
+        sel.innerHTML = '<option value="">（不选用文件）</option>';
+        for (const f of j.files || []) {
+          const opt = document.createElement("option");
+          opt.value = f.path;
+          const kb = (f.size / 1024).toFixed(f.size >= 102400 ? 0 : 1);
+          opt.textContent = `${f.name} · ${kb} KB`;
+          sel.appendChild(opt);
+        }
+        if (want && [...sel.options].some((o) => o.value === want)) {
+          sel.value = want;
+        }
+        const st = document.getElementById("wallpaperStatus");
+        const rel = AppPrefs.getUiBackground().wallpaperRel;
+        const via = j._via === "catalog" ? "（经 /api/catalog）" : "";
+        st.textContent = [
+          j.wallpaper_dir ? `目录：${j.wallpaper_dir}` : "",
+          `共 ${(j.files || []).length} 个图片文件${via}。`,
+          rel ? `当前背景：${rel}` : "当前未绑定 wallpaper 文件。",
+        ]
+          .filter(Boolean)
+          .join(" ");
+      }
+
+      document.getElementById("saveBackend").onclick = () => {
+        AppPrefs.setBackendOrigin(document.getElementById("backend").value);
+        document.getElementById("probeOut").innerText = "已保存后端地址。";
+      };
+
+      document.getElementById("saveDs").onclick = () => {
+        AppPrefs.setDeepseek({
+          apiKey: document.getElementById("key").value,
+          baseUrl: document.getElementById("base").value,
+          model: document.getElementById("model").value,
+        });
+        document.getElementById("probeOut").innerText = "已保存 DeepSeek 配置（本地）。";
+      };
+
+      document.getElementById("clear").onclick = () => {
+        document.getElementById("key").value = "";
+        AppPrefs.setDeepseek({ apiKey: "" });
+        document.getElementById("probeOut").innerText = "已清空 Key（LocalStorage）。";
+      };
+
+      function commitWallpaperRel(relPath) {
+        const custom = document.getElementById("bgCustom").value;
+        AppPrefs.setUiBackground({
+          preset: "wallpaper",
+          wallpaperRel: relPath,
+          custom,
+        });
+        document.getElementById("bgPreset").value = "wallpaper";
+        AppTheme.apply();
+      }
+
+      document.getElementById("wallpaperRefresh").onclick = async () => {
+        const probeOut = document.getElementById("probeOut");
+        probeOut.innerText = "加载列表…";
+        try {
+          await refreshWallpaperList();
+          probeOut.innerText = "已刷新 wallpaper 列表。";
+        } catch (e) {
+          probeOut.innerText = `列表失败：${e.message || String(e)}`;
+        }
+      };
+
+      document.getElementById("wallpaperUsePick").onclick = async () => {
+        const probeOut = document.getElementById("probeOut");
+        const v = document.getElementById("wallpaperPick").value;
+        if (!v) {
+          probeOut.innerText = "请先在列表中选择一项（或先刷新列表）。";
+          return;
+        }
+        commitWallpaperRel(v);
+        loadForm();
+        try {
+          await refreshWallpaperList();
+        } catch (_) {}
+        probeOut.innerText = `已使用：${v}`;
+      };
+
+      document.getElementById("saveTheme").onclick = async () => {
+        const probeOut = document.getElementById("probeOut");
+        const preset = document.getElementById("bgPreset").value;
+        const custom = document.getElementById("bgCustom").value;
+        const pick = document.getElementById("wallpaperPick").value;
+
+        if (preset === "wallpaper" && pick) {
+          commitWallpaperRel(pick);
+          loadForm();
+          await refreshWallpaperList().catch(() => {});
+          probeOut.innerText = `已应用列表中的：${pick}`;
+          return;
+        }
+
+        if (preset !== "wallpaper") {
+          AppPrefs.setUiBackground({ preset, custom, wallpaperRel: "" });
+        } else {
+          AppPrefs.setUiBackground({ preset, custom });
+        }
+        AppTheme.apply();
+        loadForm();
+        await refreshWallpaperList().catch(() => {});
+        probeOut.innerText = "已应用背景。";
+      };
+
+      document.getElementById("wallpaperClear").onclick = () => {
+        AppPrefs.setUiBackground({ preset: "plain", wallpaperRel: "" });
+        AppTheme.apply();
+        loadForm();
+        refreshWallpaperList().catch(() => {});
+        document.getElementById("probeOut").innerText = "已清除壁纸并恢复素色预设。";
+      };
+
+      document.getElementById("probe").onclick = async () => {
+        const probeOut = document.getElementById("probeOut");
+        probeOut.innerText = "探测中…";
+        try {
+          const origin = AppPrefs.backendOrigin();
+          const r = await fetch(`${origin}/api/health`, { method: "GET" });
+          const j = await r.json().catch(() => ({}));
+          probeOut.innerText = `HTTP ${r.status} ${JSON.stringify(j)}`;
+        } catch (e) {
+          probeOut.innerText = `失败：${String(e)}`;
+        }
+      };
+
+      loadForm();
+      refreshWallpaperList().catch((e) => {
+        document.getElementById("wallpaperStatus").textContent =
+          `无法加载列表：${e.message || String(e)}（请检查 Backend Origin 与后端是否运行）`;
+      });
+
+      window.addEventListener("storage", () => {
+        loadForm();
+        refreshWallpaperList().catch(() => {});
+      });
+    </script>
+  </body>
+</html>
