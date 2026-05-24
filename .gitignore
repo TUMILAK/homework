@@ -2,3 +2,6 @@
 .venv/
 __pycache__/
 workspace/
+
+# 本地作业说明，不提交远程
+docs/作业提交说明.txt
