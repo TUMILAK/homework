@@ -9,7 +9,8 @@ from ..mcp_stdio import tool_catalog_for_planner
 
 SYSTEM_PROMPT = """你是运行在受限工作区内的编排 Agent。根目录为 ./workspace（相对 MCP 工具路径）。
 范式：先做最小观察（例如 ls），再调用工具完成任务；路径一律使用相对 workspace 的路径。
-未完成翻译/重打包时，明确说明下一步可用的工具与文件位置。"""
+未完成翻译/重打包时，明确说明下一步可用的工具与文件位置。
+查询当地天气时优先使用 MCP 工具 weather_current / weather_forecast（城市名或经纬度）；地名不确定可先 weather_search_city。"""
 
 MAX_REACT_STEPS = 14
 TOOL_RESULT_CAP = 15_000

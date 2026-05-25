@@ -1,4 +1,4 @@
-"""FastMCP stdio server: workspace + generic URL capture (subprocess of backend)."""
+"""FastMCP stdio server: workspace + URL capture + weather tools (subprocess of backend)."""
 
 import asyncio
 import hashlib
@@ -14,6 +14,8 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 
+from mcp_tools.weather import register_weather_tools
+
 logging.basicConfig(level=logging.ERROR, stream=sys.stderr)
 os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 
@@ -26,6 +28,7 @@ catalog_dir.mkdir(parents=True, exist_ok=True)
 workspace.mkdir(exist_ok=True)
 
 mcp = FastMCP("workspace-agent")
+register_weather_tools(mcp)
 
 
 def safe_path(rel: str) -> Path:
