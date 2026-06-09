@@ -7,7 +7,7 @@
       "radial-gradient(900px 520px at 18% -5%, rgba(255,255,255,0.07) 0%, transparent 58%), linear-gradient(180deg, #3c4048 0%, #363a42 40%, #2e3138 100%)",
     midnight: "linear-gradient(180deg, #3a3e46 0%, #363a42 35%, #2f3238 70%, #282b30 100%)",
     ocean:
-      "radial-gradient(ellipse 85% 55% at 50% -18%, rgba(255,255,255,0.06) 0%, transparent 52%), linear-gradient(180deg, #3e424a 0%, #32363d 55%, #2a2d32 100%)",
+      "radial-gradient(ellipse 85% 55% at 50% -18%, rgba(255, 255, 255, 0.06) 0%, transparent 52%), linear-gradient(180deg, #3e424a 0%, #32363d 55%, #2a2d32 100%)",
     ember:
       "radial-gradient(800px 480px at 88% 8%, rgba(255,255,255,0.05) 0%, transparent 50%), linear-gradient(180deg, #383c44 0%, #30343a 50%, #282b30 100%)",
     wallpaper: null,

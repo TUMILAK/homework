@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Agent</title>
+    <title>搜题 Agent</title>
     <link
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.1.1/css/pico.min.css"
@@ -15,13 +15,105 @@
   <body class="page">
     <header class="topbar">
       <div class="brand">
-        <h1>Agent</h1>
+        <h1>搜题 Agent</h1>
+        <span>图片 OCR · 本地文件 · 连续对话 · 回答按日保存</span>
       </div>
       <nav class="topnav" aria-label="主导航">
-        <a class="navlink" href="/crawl.html">爬取</a>
-        <a class="navlink" href="/agent.html">工作台</a>
+        <a class="navlink primary" href="/index.html">工作台</a>
         <a class="navlink" href="/settings.html">设置</a>
       </nav>
     </header>
+
+    <main class="main">
+      <div class="card">
+        <h2>模式</h2>
+        <div class="mode-tabs" role="tablist">
+          <button type="button" id="modeSolve" class="active" data-mode="solve">搜题</button>
+          <button type="button" id="modeChat" data-mode="chat">聊天</button>
+        </div>
+        <p class="theme-hint" style="margin-top: 0.75rem">
+          当前模型：<strong id="modelLabel">—</strong>。
+          搜题模式回答自动追加到 <code style="color: var(--text)">answers/YYYY-MM-DD.md</code>；
+          聊天模式可选是否保存。
+        </p>
+        <div class="form-row">
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer">
+            <input id="saveChatToggle" type="checkbox" />
+            <span>聊天时也保存回答到本地（默认关）</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>文字搜题 / 聊天</h2>
+        <div class="form-row">
+          <label for="userInput">输入</label>
+          <textarea id="userInput" rows="6" spellcheck="false" placeholder="粘贴题目或开始对话…"></textarea>
+        </div>
+        <div class="actions">
+          <button id="sendText" class="primary" type="button">发送</button>
+          <button id="clearChat" type="button">清空对话</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>图片题目</h2>
+        <p class="theme-hint">
+          支持 JPG / PNG / BMP / WebP。使用本地部署的 <strong>PaddleOCR</strong> 识别（无需联网）。
+        </p>
+        <div class="form-row">
+          <label for="imgFiles">选择图片（可多选批量）</label>
+          <input
+            id="imgFiles"
+            type="file"
+            accept="image/jpeg,image/png,image/bmp,image/webp,.jpg,.jpeg,.png,.bmp,.webp"
+            multiple
+          />
+        </div>
+        <div class="form-row">
+          <label for="ocrPreview">识别预览（可编辑后求解）</label>
+          <textarea id="ocrPreview" class="ocr-preview" rows="5" spellcheck="false" placeholder="OCR 结果将显示在此…"></textarea>
+        </div>
+        <div class="actions">
+          <button id="ocrOnly" type="button">仅 OCR</button>
+          <button id="solveImage" class="primary" type="button">识别并求解</button>
+          <button id="solveBatch" type="button">批量求解</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>本地文件</h2>
+        <p class="theme-hint">
+          将题目文件放入服务端 <code style="color: var(--text)">souti_agent/data/</code>，或下方上传到该目录（只读解析，不修改原文件）。
+        </p>
+        <div class="form-row">
+          <label for="uploadFile">上传到 data/</label>
+          <input id="uploadFile" type="file" accept=".txt,.md,.pdf,.markdown" />
+        </div>
+        <div class="form-row">
+          <label for="dataPath">data/ 内相对路径</label>
+          <input id="dataPath" placeholder="例：exam.md 或 文件夹/" autocomplete="off" />
+        </div>
+        <div class="actions">
+          <button id="listData" type="button">列出文件</button>
+          <button id="readFile" type="button">读取并预览</button>
+          <button id="readFolder" type="button">递归读取文件夹</button>
+          <button id="solveFile" class="primary" type="button">读取并求解</button>
+        </div>
+        <textarea id="filePreview" rows="4" spellcheck="false" placeholder="文件内容预览…"></textarea>
+      </div>
+
+      <section class="stack-gap">
+        <h2 style="margin: 0 0 8px; font-size: 0.9375rem; font-weight: 600">对话区</h2>
+        <div id="chatPanel" class="chat-panel" aria-live="polite"></div>
+      </section>
+
+      <section class="stack-gap">
+        <h2 style="margin: 0 0 8px; font-size: 0.9375rem; font-weight: 600">日志</h2>
+        <div id="log" class="log"></div>
+      </section>
+    </main>
+
+    <script src="/js/app.js"></script>
   </body>
 </html>

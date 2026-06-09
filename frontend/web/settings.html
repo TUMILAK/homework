@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>设置 · DeepSeek</title>
+    <title>设置 · 搜题 Agent</title>
     <link
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.1.1/css/pico.min.css"
@@ -16,41 +16,48 @@
     <header class="topbar">
       <div class="brand">
         <h1>设置</h1>
-        <span>API、后端与外观</span>
+        <span>模型、API Key 与后端</span>
       </div>
       <nav class="topnav" aria-label="主导航">
-        <a class="navlink" href="/index.html">主页</a>
-        <a class="navlink" href="/crawl.html">爬取</a>
-        <a class="navlink" href="/agent.html">智能体</a>
+        <a class="navlink" href="/index.html">工作台</a>
+        <a class="navlink primary" href="/settings.html">设置</a>
       </nav>
     </header>
 
     <main class="main main--narrow">
       <div class="card">
-        <h2>后端地址</h2>
-        <p class="theme-hint" style="margin-bottom: 0.75rem">
-          填「站点根」即可，不要带 <code style="color: var(--text)">/api</code>（例
-          <code style="color: var(--text)">http://127.0.0.1:8000</code>）。
-        </p>
+        <h2>后端</h2>
         <div class="form-row">
-          <label for="backend">Backend Origin（不含末尾 /）</label>
-          <input id="backend" autocomplete="off" />
+          <label for="backend">Backend Origin</label>
+          <input id="backend" autocomplete="off" placeholder="http://127.0.0.1:8010" />
         </div>
         <div class="actions">
           <button id="probe" type="button">测试 /api/health</button>
-          <button id="saveBackend" type="button" class="primary">保存后端地址</button>
+          <button id="saveBackend" class="primary" type="button">保存</button>
         </div>
         <p id="probeOut" class="hint"></p>
       </div>
 
       <div class="card">
-        <h2>DeepSeek</h2>
+        <h2>模型与 API Key</h2>
+        <p class="theme-hint">
+          Key 仅保存在浏览器 localStorage，请求时直发后端再转发至模型厂商，服务端不落盘。
+        </p>
         <div class="form-row">
-          <label for="key">API Key</label>
-          <input id="key" autocomplete="off" spellcheck="false" />
+          <label for="provider">当前使用</label>
+          <select id="provider">
+            <option value="deepseek">DeepSeek</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic 网关</option>
+            <option value="custom">自定义 / 本地 Ollama 等</option>
+          </select>
         </div>
         <div class="form-row">
-          <label for="base">Base URL（默认官方）</label>
+          <label for="key">API Key</label>
+          <input id="key" type="password" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="form-row">
+          <label for="base">Base URL</label>
           <input id="base" autocomplete="off" />
         </div>
         <div class="form-row">
@@ -58,20 +65,17 @@
           <input id="model" autocomplete="off" />
         </div>
         <div class="actions">
-          <button id="saveDs" type="button" class="primary">保存</button>
-          <button id="clear" type="button">清空 Key（仅前端）</button>
+          <button id="validateKey" type="button">验证 Key</button>
+          <button id="saveProvider" class="primary" type="button">保存当前提供商配置</button>
+          <button id="clearKey" type="button">清空 Key</button>
         </div>
-        <p class="hint" style="margin-top: 0.65rem">
-          Key 仅存浏览器本地；服务端不会持久化密钥。也可以通过环境变量
-          <code style="color: var(--text)">DPSK_API_KEY</code> 提供兜底。
-        </p>
+        <p id="validateOut" class="hint"></p>
       </div>
 
       <div class="card">
         <h2>外观 · 背景</h2>
         <p class="theme-hint">
-          背景图从服务端 <code style="color: var(--text)">workspace/wallpaper/</code> 读取。请将图片自行放入该目录（或 MCP
-          写入），再「刷新列表」并选用；本页不提供浏览器上传。
+          背景图从服务端 <code style="color: var(--text)">workspace/wallpaper/</code> 读取（与 ciallo agent 共用目录）。请将图片放入该目录后「刷新列表」并选用；本页不提供浏览器上传。
         </p>
         <div class="form-row">
           <label for="bgPreset">预设</label>
@@ -115,20 +119,38 @@
           <button id="saveTheme" type="button" class="primary">应用背景</button>
         </div>
       </div>
+
+      <div class="card">
+        <h2>回答存档</h2>
+        <p class="theme-hint">
+          搜题结果默认写入 <code style="color: var(--text)">souti_agent/answers/YYYY-MM-DD.md</code>，同一天多次回答追加到同一文件。
+        </p>
+        <div class="actions">
+          <button id="listAnswers" type="button">刷新存档列表</button>
+        </div>
+        <ul id="answerList" class="hint" style="padding-left: 1.2rem"></ul>
+      </div>
     </main>
 
     <script>
+      const qs = (id) => document.getElementById(id);
+
+      function loadProviderForm() {
+        const pid = qs("provider").value;
+        SoutiPrefs.setActiveProvider(pid);
+        const cfg = SoutiPrefs.loadProviderConfig(pid);
+        qs("key").value = cfg.apiKey;
+        qs("base").value = cfg.baseUrl;
+        qs("model").value = cfg.model;
+      }
+
       function loadForm() {
-        document.getElementById("backend").value = AppPrefs.backendOrigin();
-
-        const ds = AppPrefs.deepseek();
-        document.getElementById("key").value = ds.apiKey;
-        document.getElementById("base").value = ds.baseUrl;
-        document.getElementById("model").value = ds.model;
-
+        qs("backend").value = SoutiPrefs.backendOrigin();
+        qs("provider").value = SoutiPrefs.activeProvider();
+        loadProviderForm();
         const bg = AppPrefs.getUiBackground();
-        document.getElementById("bgPreset").value = bg.preset;
-        document.getElementById("bgCustom").value = bg.custom;
+        qs("bgPreset").value = bg.preset;
+        qs("bgCustom").value = bg.custom;
       }
 
       async function fetchWallpaperListPayload() {
@@ -142,9 +164,7 @@
           j = await r.json().catch(() => ({}));
           if (!r.ok) {
             const d = j.detail || j.message || r.statusText;
-            throw new Error(
-              typeof d === "string" ? d : `catalog ${r.status}: ${JSON.stringify(d)}`
-            );
+            throw new Error(typeof d === "string" ? d : `catalog ${r.status}`);
           }
           const imgExt = /\.(jpe?g|png|webp|gif)$/i;
           const imgs = (j.files || []).filter((f) => {
@@ -164,14 +184,12 @@
           };
         }
         const d = j.detail || j.message || r.statusText;
-        throw new Error(
-          `${typeof d === "string" ? d : JSON.stringify(d)}（请求：${listUrl}）`
-        );
+        throw new Error(typeof d === "string" ? d : JSON.stringify(d));
       }
 
       async function refreshWallpaperList() {
         const j = await fetchWallpaperListPayload();
-        const sel = document.getElementById("wallpaperPick");
+        const sel = qs("wallpaperPick");
         const want = AppPrefs.getUiBackground().wallpaperRel || "";
         sel.innerHTML = '<option value="">（不选用文件）</option>';
         for (const f of j.files || []) {
@@ -184,7 +202,7 @@
         if (want && [...sel.options].some((o) => o.value === want)) {
           sel.value = want;
         }
-        const st = document.getElementById("wallpaperStatus");
+        const st = qs("wallpaperStatus");
         const rel = AppPrefs.getUiBackground().wallpaperRel;
         const via = j._via === "catalog" ? "（经 /api/catalog）" : "";
         st.textContent = [
@@ -196,53 +214,30 @@
           .join(" ");
       }
 
-      document.getElementById("saveBackend").onclick = () => {
-        AppPrefs.setBackendOrigin(document.getElementById("backend").value);
-        document.getElementById("probeOut").innerText = "已保存后端地址。";
-      };
-
-      document.getElementById("saveDs").onclick = () => {
-        AppPrefs.setDeepseek({
-          apiKey: document.getElementById("key").value,
-          baseUrl: document.getElementById("base").value,
-          model: document.getElementById("model").value,
-        });
-        document.getElementById("probeOut").innerText = "已保存 DeepSeek 配置（本地）。";
-      };
-
-      document.getElementById("clear").onclick = () => {
-        document.getElementById("key").value = "";
-        AppPrefs.setDeepseek({ apiKey: "" });
-        document.getElementById("probeOut").innerText = "已清空 Key（LocalStorage）。";
-      };
-
       function commitWallpaperRel(relPath) {
-        const custom = document.getElementById("bgCustom").value;
         AppPrefs.setUiBackground({
           preset: "wallpaper",
           wallpaperRel: relPath,
-          custom,
+          custom: qs("bgCustom").value,
         });
-        document.getElementById("bgPreset").value = "wallpaper";
+        qs("bgPreset").value = "wallpaper";
         AppTheme.apply();
       }
 
-      document.getElementById("wallpaperRefresh").onclick = async () => {
-        const probeOut = document.getElementById("probeOut");
-        probeOut.innerText = "加载列表…";
+      qs("wallpaperRefresh").onclick = async () => {
+        qs("probeOut").textContent = "加载壁纸列表…";
         try {
           await refreshWallpaperList();
-          probeOut.innerText = "已刷新 wallpaper 列表。";
+          qs("probeOut").textContent = "已刷新 wallpaper 列表。";
         } catch (e) {
-          probeOut.innerText = `列表失败：${e.message || String(e)}`;
+          qs("probeOut").textContent = `列表失败：${e.message || e}`;
         }
       };
 
-      document.getElementById("wallpaperUsePick").onclick = async () => {
-        const probeOut = document.getElementById("probeOut");
-        const v = document.getElementById("wallpaperPick").value;
+      qs("wallpaperUsePick").onclick = async () => {
+        const v = qs("wallpaperPick").value;
         if (!v) {
-          probeOut.innerText = "请先在列表中选择一项（或先刷新列表）。";
+          qs("probeOut").textContent = "请先在列表中选择一项。";
           return;
         }
         commitWallpaperRel(v);
@@ -250,20 +245,19 @@
         try {
           await refreshWallpaperList();
         } catch (_) {}
-        probeOut.innerText = `已使用：${v}`;
+        qs("probeOut").textContent = `已使用：${v}`;
       };
 
-      document.getElementById("saveTheme").onclick = async () => {
-        const probeOut = document.getElementById("probeOut");
-        const preset = document.getElementById("bgPreset").value;
-        const custom = document.getElementById("bgCustom").value;
-        const pick = document.getElementById("wallpaperPick").value;
+      qs("saveTheme").onclick = async () => {
+        const preset = qs("bgPreset").value;
+        const custom = qs("bgCustom").value;
+        const pick = qs("wallpaperPick").value;
 
         if (preset === "wallpaper" && pick) {
           commitWallpaperRel(pick);
           loadForm();
           await refreshWallpaperList().catch(() => {});
-          probeOut.innerText = `已应用列表中的：${pick}`;
+          qs("probeOut").textContent = `已应用：${pick}`;
           return;
         }
 
@@ -275,39 +269,106 @@
         AppTheme.apply();
         loadForm();
         await refreshWallpaperList().catch(() => {});
-        probeOut.innerText = "已应用背景。";
+        qs("probeOut").textContent = "已应用背景。";
       };
 
-      document.getElementById("wallpaperClear").onclick = () => {
+      qs("wallpaperClear").onclick = () => {
         AppPrefs.setUiBackground({ preset: "plain", wallpaperRel: "" });
         AppTheme.apply();
         loadForm();
         refreshWallpaperList().catch(() => {});
-        document.getElementById("probeOut").innerText = "已清除壁纸并恢复素色预设。";
+        qs("probeOut").textContent = "已清除壁纸并恢复素色预设。";
       };
 
-      document.getElementById("probe").onclick = async () => {
-        const probeOut = document.getElementById("probeOut");
-        probeOut.innerText = "探测中…";
+      qs("provider").onchange = loadProviderForm;
+
+      qs("saveBackend").onclick = () => {
+        SoutiPrefs.setBackendOrigin(qs("backend").value);
+        qs("probeOut").textContent = "已保存后端地址。";
+      };
+
+      qs("saveProvider").onclick = () => {
+        const pid = qs("provider").value;
+        SoutiPrefs.saveProviderConfig(pid, {
+          apiKey: qs("key").value,
+          baseUrl: qs("base").value,
+          model: qs("model").value,
+        });
+        SoutiPrefs.setActiveProvider(pid);
+        qs("validateOut").textContent = `已保存 ${SoutiPrefs.PROVIDERS[pid]?.label || pid} 配置。`;
+      };
+
+      qs("clearKey").onclick = () => {
+        qs("key").value = "";
+        SoutiPrefs.saveProviderConfig(qs("provider").value, { apiKey: "" });
+        qs("validateOut").textContent = "已清空 Key（仅本地）。";
+      };
+
+      qs("validateKey").onclick = async () => {
+        qs("validateOut").textContent = "验证中…";
         try {
-          const origin = AppPrefs.backendOrigin();
-          const r = await fetch(`${origin}/api/health`, { method: "GET" });
+          const r = await fetch(SoutiPrefs.apiUrl("/api/validate-key"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              api_key: qs("key").value,
+              base_url: qs("base").value,
+              model: qs("model").value,
+            }),
+          });
           const j = await r.json().catch(() => ({}));
-          probeOut.innerText = `HTTP ${r.status} ${JSON.stringify(j)}`;
+          if (!r.ok) throw new Error(j.detail || r.statusText);
+          qs("validateOut").textContent = j.ok
+            ? `有效：${j.message}${j.sample ? " · " + j.sample : ""}`
+            : `无效：${j.message}`;
         } catch (e) {
-          probeOut.innerText = `失败：${String(e)}`;
+          qs("validateOut").textContent = `失败：${e.message || e}`;
+        }
+      };
+
+      qs("probe").onclick = async () => {
+        qs("probeOut").textContent = "探测中…";
+        try {
+          const r = await fetch(SoutiPrefs.apiUrl("/api/health"));
+          const j = await r.json();
+          qs("probeOut").textContent = `HTTP ${r.status} ${JSON.stringify(j)}`;
+        } catch (e) {
+          qs("probeOut").textContent = `失败：${e}`;
+        }
+      };
+
+      qs("listAnswers").onclick = async () => {
+        const ul = qs("answerList");
+        ul.innerHTML = "";
+        try {
+          const r = await fetch(SoutiPrefs.apiUrl("/api/answers/list"));
+          const j = await r.json();
+          for (const name of j.files || []) {
+            const li = document.createElement("li");
+            const a = document.createElement("a");
+            a.href = SoutiPrefs.apiUrl(`/api/answers/download?name=${encodeURIComponent(name)}`);
+            a.textContent = name;
+            a.target = "_blank";
+            li.appendChild(a);
+            ul.appendChild(li);
+          }
+          if (!ul.children.length) ul.textContent = "（暂无存档）";
+        } catch (e) {
+          ul.textContent = `列表失败：${e.message || e}`;
         }
       };
 
       loadForm();
+      qs("listAnswers").click();
       refreshWallpaperList().catch((e) => {
-        document.getElementById("wallpaperStatus").textContent =
-          `无法加载列表：${e.message || String(e)}（请检查 Backend Origin 与后端是否运行）`;
+        qs("wallpaperStatus").textContent =
+          `无法加载列表：${e.message || e}（请确认后端已启动）`;
       });
 
       window.addEventListener("storage", () => {
         loadForm();
         refreshWallpaperList().catch(() => {});
+        AppTheme.apply();
       });
     </script>
   </body>

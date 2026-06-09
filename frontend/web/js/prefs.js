@@ -1,57 +1,111 @@
 (() => {
-  /** Strip trailing `/api` so fetch(`${origin}/api/...`) does not become `/api/api/...`. */
-  function normalizeApiBase(s) {
-    let x = String(s || "").trim().replace(/\/+$/, "");
-    x = x.replace(/\/api\/?$/i, "");
-    return x.replace(/\/+$/, "");
+  const PREFIX = "souti.";
+
+  const PROVIDERS = Object.freeze({
+    deepseek: {
+      label: "DeepSeek",
+      baseUrl: "https://api.deepseek.com",
+      model: "deepseek-v4-pro",
+    },
+    openai: {
+      label: "OpenAI",
+      baseUrl: "https://api.openai.com/v1",
+      model: "gpt-4o",
+    },
+    anthropic: {
+      label: "Anthropic 网关",
+      baseUrl: "https://api.anthropic.com/v1",
+      model: "claude-sonnet-4-20250514",
+    },
+    custom: {
+      label: "自定义 / 本地",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      model: "llama3",
+    },
+  });
+
+  function key(name) {
+    return PREFIX + name;
   }
 
   function defaultBackendOrigin() {
     try {
-      if (location.protocol !== "http:" && location.protocol !== "https:") {
-        return "http://127.0.0.1:8000";
+      if (location.protocol === "http:" || location.protocol === "https:") {
+        return location.origin;
       }
-      const port = location.port || (location.protocol === "https:" ? "443" : "80");
-      const staticDevPorts = new Set(["5500", "5501", "5173", "4173", "3000", "8080", "1234"]);
-      if (staticDevPorts.has(port)) {
-        return `${location.protocol}//${location.hostname}:8000`;
-      }
-      return location.origin;
-    } catch {
-      return "http://127.0.0.1:8000";
-    }
+    } catch (_) {}
+    return "http://127.0.0.1:8010";
   }
 
-  const defaults = Object.freeze({
-    deepseekApiKey: "",
-    deepseekBaseUrl: "https://api.deepseek.com",
-    deepseekModel: "deepseek-v4-pro",
-  });
+  function loadProviderConfig(providerId) {
+    const def = PROVIDERS[providerId] || PROVIDERS.deepseek;
+    return {
+      apiKey: localStorage.getItem(key(`key.${providerId}`)) || "",
+      baseUrl: localStorage.getItem(key(`base.${providerId}`)) || def.baseUrl,
+      model: localStorage.getItem(key(`model.${providerId}`)) || def.model,
+    };
+  }
 
-  window.AppPrefs = {
+  const prefs = {
+    PROVIDERS,
+
+    // 与 ciallo agent 共用 localStorage 键，壁纸/预设可跨应用同步
     keys: {
-      BACKEND_ORIGIN: "agent.backend_origin",
-      DS_KEY: "agent.deepseek_api_key",
-      DS_BASE: "agent.deepseek_base_url",
-      DS_MODEL: "agent.deepseek_model",
+      BACKEND_ORIGIN: key("backend"),
       UI_BG_PRESET: "agent.ui_bg_preset",
       UI_BG_CUSTOM: "agent.ui_bg_custom",
       UI_WALLPAPER_REL: "agent.ui_wallpaper_rel",
     },
 
-    defaults,
-
     backendOrigin() {
-      const saved = localStorage.getItem(this.keys.BACKEND_ORIGIN);
-      const raw =
-        saved && saved.trim() ? saved.trim() : defaultBackendOrigin();
-      return normalizeApiBase(raw);
+      return (
+        localStorage.getItem(this.keys.BACKEND_ORIGIN) || defaultBackendOrigin()
+      ).replace(/\/+$/, "");
     },
 
     setBackendOrigin(v) {
-      const t = normalizeApiBase((v || "").trim());
+      const t = String(v || "").trim().replace(/\/+$/, "");
       if (t) localStorage.setItem(this.keys.BACKEND_ORIGIN, t);
       else localStorage.removeItem(this.keys.BACKEND_ORIGIN);
+    },
+
+    activeProvider() {
+      return localStorage.getItem(key("provider")) || "deepseek";
+    },
+
+    setActiveProvider(id) {
+      localStorage.setItem(key("provider"), id);
+    },
+
+    loadProviderConfig,
+    loadActiveConfig() {
+      return loadProviderConfig(this.activeProvider());
+    },
+
+    saveProviderConfig(providerId, { apiKey, baseUrl, model }) {
+      if (typeof apiKey === "string") {
+        localStorage.setItem(key(`key.${providerId}`), apiKey.trim());
+      }
+      if (typeof baseUrl === "string" && baseUrl.trim()) {
+        localStorage.setItem(key(`base.${providerId}`), baseUrl.trim().replace(/\/+$/, ""));
+      }
+      if (typeof model === "string" && model.trim()) {
+        localStorage.setItem(key(`model.${providerId}`), model.trim());
+      }
+    },
+
+    saveChatHistory() {
+      return localStorage.getItem(key("save_chat")) !== "0";
+    },
+
+    setSaveChatHistory(on) {
+      localStorage.setItem(key("save_chat"), on ? "1" : "0");
+    },
+
+    apiUrl(path) {
+      const base = this.backendOrigin();
+      const p = path.startsWith("/") ? path : `/${path}`;
+      return `${base}${p}`;
     },
 
     catalogDownloadHref(relativePath) {
@@ -64,37 +118,6 @@
         return `${u.origin}${p}`;
       } catch {
         return p;
-      }
-    },
-
-    deepseek() {
-      return {
-        apiKey: localStorage.getItem(this.keys.DS_KEY) || "",
-        baseUrl: localStorage.getItem(this.keys.DS_BASE) || defaults.deepseekBaseUrl,
-        model: localStorage.getItem(this.keys.DS_MODEL) || defaults.deepseekModel,
-      };
-    },
-
-    setDeepseek({ apiKey, baseUrl, model }) {
-      if (typeof apiKey === "string") {
-        localStorage.setItem(this.keys.DS_KEY, apiKey.trim());
-      }
-      if (typeof baseUrl === "string" && baseUrl.trim()) {
-        localStorage.setItem(this.keys.DS_BASE, baseUrl.trim().replace(/\/+$/, ""));
-      }
-      if (typeof model === "string" && model.trim()) {
-        localStorage.setItem(this.keys.DS_MODEL, model.trim());
-      }
-    },
-
-    wsAgentURL() {
-      try {
-        const u = new URL(this.backendOrigin());
-        u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
-        return `${u.origin}/ws/agent`;
-      } catch {
-        const proto = location.protocol === "https:" ? "wss" : "ws";
-        return `${proto}://${location.host}/ws/agent`;
       }
     },
 
@@ -118,4 +141,7 @@
       }
     },
   };
+
+  window.SoutiPrefs = prefs;
+  window.AppPrefs = prefs;
 })();
