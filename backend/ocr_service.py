@@ -1,16 +1,75 @@
-"""图片 OCR：本地 PaddleOCR。"""
-
-# 必须在导入 PaddleOCR (paddle) 之前设置，解决 Windows 上 OneDNN fused_conv2d 报错
-import os
-os.environ.setdefault('FLAGS_use_onednn', '0')
-os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
-os.environ.setdefault('OMP_NUM_THREADS', '1')
+"""图片 OCR：本地 PaddleOCR（Windows + Paddle 3.3 需 patch 关闭 OneDNN/IR 融合）。"""
 
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 from typing import List, Optional, Tuple
+
+
+def _bootstrap_paddle_env() -> None:
+    for key, val in {
+        "FLAGS_use_mkldnn": "0",
+        "FLAGS_use_onednn": "0",
+        "FLAGS_enable_onednn": "0",
+        "FLAGS_use_dnnl": "0",
+        "PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK": "True",
+        "KMP_DUPLICATE_LIB_OK": "TRUE",
+        "OMP_NUM_THREADS": "1",
+    }.items():
+        os.environ[key] = val
+
+
+_bootstrap_paddle_env()
+
+
+def _patch_paddleocr_inference() -> None:
+    """
+    Paddle 3.3 + PaddleOCR 2.8 在 Windows CPU 上即使用 enable_mkldnn=False
+    仍会因 IR 融合走 fused_conv2d/OneDNN 崩溃；须 patch Config。
+    """
+    try:
+        import paddle.inference as inference
+        import paddleocr.tools.infer.utility as utility
+    except ImportError:
+        return
+
+    if getattr(utility, "_souti_patched", False):
+        return
+
+    Config = inference.Config
+    _orig_switch = Config.switch_ir_optim
+    _orig_mem = Config.enable_memory_optim
+    _orig_mkldnn = Config.enable_mkldnn
+    _orig_create = utility.create_predictor
+
+    def switch_ir_optim(self, enable=True):
+        return _orig_switch(self, False)
+
+    def enable_memory_optim(self):
+        return None
+
+    def enable_mkldnn(self, *args, **kwargs):
+        return None
+
+    Config.switch_ir_optim = switch_ir_optim  # type: ignore[method-assign]
+    Config.enable_memory_optim = enable_memory_optim  # type: ignore[method-assign]
+    Config.enable_mkldnn = enable_mkldnn  # type: ignore[method-assign]
+
+    def create_predictor(args, mode, logger, model_dir=None):
+        args.enable_mkldnn = False
+        if hasattr(args, "use_mkldnn"):
+            args.use_mkldnn = False
+        if model_dir is None:
+            return _orig_create(args, mode, logger)
+        return _orig_create(args, mode, logger, model_dir)
+
+    utility.create_predictor = create_predictor
+    utility._souti_patched = True
+
+
+_patch_paddleocr_inference()
 
 import cv2
 import numpy as np
@@ -21,35 +80,49 @@ _engine = None
 _engine_lock = threading.Lock()
 
 
+def _apply_paddle_runtime_flags() -> None:
+    try:
+        import paddle
+
+        if hasattr(paddle, "set_flags"):
+            paddle.set_flags(
+                {
+                    "FLAGS_use_mkldnn": False,
+                    "FLAGS_use_onednn": False,
+                    "FLAGS_enable_onednn": False,
+                }
+            )
+    except Exception:
+        pass
+
+
 def _create_paddle_ocr():
+    _patch_paddleocr_inference()
+    _apply_paddle_runtime_flags()
     try:
         from paddleocr import PaddleOCR
     except ImportError as e:
         raise RuntimeError(
             "未安装 PaddleOCR。请在 souti_agent 目录执行：\n"
-            "  pip install paddlepaddle paddleocr opencv-python-headless \"numpy<2\"\n"
-            "Windows CPU 可参考 README 中的官方 whl 源。"
+            '  pip install "paddlepaddle>=3.2" paddleocr opencv-python-headless "numpy<2"'
         ) from e
 
-    # 兼容 PaddleOCR 2.x / 3.x 构造参数差异
-    attempts = [
-        {
-            "use_angle_cls": True,
-            "lang": PADDLE_OCR_LANG,
-            "show_log": False,
-            "use_gpu": PADDLE_OCR_USE_GPU,
-        },
-        {"lang": PADDLE_OCR_LANG, "use_gpu": PADDLE_OCR_USE_GPU},
-        {"lang": PADDLE_OCR_LANG},
-        {},
-    ]
-    last_err: Optional[Exception] = None
-    for kw in attempts:
-        try:
-            return PaddleOCR(**kw)
-        except Exception as e:
-            last_err = e
-    raise RuntimeError(f"PaddleOCR 初始化失败: {last_err}") from last_err
+    kw = {
+        "lang": PADDLE_OCR_LANG,
+        "show_log": False,
+        "enable_mkldnn": False,
+        "use_gpu": PADDLE_OCR_USE_GPU,
+        "use_angle_cls": True,
+    }
+    try:
+        return PaddleOCR(**kw)
+    except TypeError:
+        kw.pop("show_log", None)
+        return PaddleOCR(
+            lang=PADDLE_OCR_LANG,
+            enable_mkldnn=False,
+            use_gpu=PADDLE_OCR_USE_GPU,
+        )
 
 
 def get_paddle_ocr():
@@ -60,6 +133,12 @@ def get_paddle_ocr():
         if _engine is None:
             _engine = _create_paddle_ocr()
         return _engine
+
+
+def reset_paddle_ocr() -> None:
+    global _engine
+    with _engine_lock:
+        _engine = None
 
 
 def _bytes_to_bgr(image_bytes: bytes) -> np.ndarray:
@@ -75,7 +154,6 @@ def _parse_paddle_result(result) -> str:
     if result is None:
         return ""
 
-    # PaddleOCR 3.x：单条结果为 dict 或 dict 列表
     if isinstance(result, dict):
         result = [result]
 
@@ -114,23 +192,47 @@ def _parse_paddle_result(result) -> str:
     return "\n".join(lines)
 
 
+def _run_ocr_infer(ocr, img: np.ndarray):
+    if hasattr(ocr, "ocr"):
+        try:
+            return ocr.ocr(img, cls=True)
+        except TypeError:
+            return ocr.ocr(img)
+    if hasattr(ocr, "predict"):
+        try:
+            return ocr.predict(img)
+        except TypeError:
+            return ocr.predict(input=img)
+    raise RuntimeError("PaddleOCR 实例缺少 ocr / predict 方法")
+
+
 def _run_paddle_on_image(image_bytes: bytes) -> str:
+    _patch_paddleocr_inference()
+    _apply_paddle_runtime_flags()
     ocr = get_paddle_ocr()
     img = _bytes_to_bgr(image_bytes)
 
-    result = None
-    if hasattr(ocr, "ocr"):
+    last_err: Optional[Exception] = None
+    for attempt in range(2):
         try:
-            result = ocr.ocr(img, cls=True)
-        except TypeError:
-            result = ocr.ocr(img)
-    if result is None and hasattr(ocr, "predict"):
-        result = ocr.predict(img)
+            result = _run_ocr_infer(ocr, img)
+            text = _parse_paddle_result(result)
+            if text.strip():
+                return text
+            raise ValueError("PaddleOCR 未识别到文字，请换更清晰的图片")
+        except Exception as e:
+            last_err = e
+            msg = str(e).lower()
+            if attempt == 0 and (
+                "onednn" in msg or "mkldnn" in msg or "fused_conv2d" in msg
+            ):
+                reset_paddle_ocr()
+                _patch_paddleocr_inference()
+                ocr = get_paddle_ocr()
+                continue
+            raise
 
-    text = _parse_paddle_result(result)
-    if not text.strip():
-        raise ValueError("PaddleOCR 未识别到文字，请换更清晰的图片")
-    return text
+    raise RuntimeError(f"OCR 失败: {last_err}") from last_err
 
 
 async def ocr_image(
@@ -141,8 +243,7 @@ async def ocr_image(
     base_url: str = "",
     model: str = "",
 ) -> Tuple[str, str]:
-    """返回 (识别文本, 方法说明)。api_key 等参数保留以兼容旧调用，OCR 仅用本地 Paddle。"""
     _ = mime, api_key, base_url, model
     loop = asyncio.get_running_loop()
     text = await loop.run_in_executor(None, _run_paddle_on_image, image_bytes)
-    return text, f"paddleocr({PADDLE_OCR_LANG})"
+    return text, f"paddleocr({PADDLE_OCR_LANG},ir_off)"

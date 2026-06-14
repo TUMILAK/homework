@@ -4,8 +4,8 @@ python-dotenv>=1.0.0
 openai>=1.55.0
 python-multipart>=0.0.12
 pypdf>=5.0.0
-# 本地 PaddleOCR（numpy<2 与 paddle 兼容）
+# PaddleOCR（Windows CPU 需配合 backend/ocr_service.py 内 patch）
 numpy<2
 opencv-python-headless>=4.8.0
-paddlepaddle>=2.6.0
-paddleocr>=2.7.0
+paddlepaddle>=3.2.0,<3.4.0
+paddleocr>=2.7.0,<3.0.0
